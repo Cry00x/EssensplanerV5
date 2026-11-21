@@ -1,0 +1,20 @@
+{
+  "name": "Essensplaner – Mittagessen & Einkauf",
+  "short_name": "Essensplaner",
+  "description": "Wochenplan für Mittagessen mit Rezepten, Einkaufsliste und Budget – auch offline.",
+  "lang": "de",
+  "dir": "ltr",
+  "id": "./",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fdf3dc",
+  "theme_color": "#2f7d4f",
+  "categories": ["food", "lifestyle", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
