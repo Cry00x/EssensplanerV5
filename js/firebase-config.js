@@ -9,7 +9,7 @@
  * apiKey fehlt absichtlich: Ich kenne ihn nicht und erfinde ihn nicht. Trage ihn hier ein ODER füge den kompletten
  * firebaseConfig-Block in der App ein (Mehr → Familienplan), dann wird er nur auf deinem Gerät gespeichert. */
 window.FIREBASE_CONFIG = {
-  apiKey: '',
+  apiKey: 'AIzaSyBT5PMtMxEVoc7oa3U_OPba5bQVYFaHc0A',
   authDomain: 'essensplaner-family.firebaseapp.com',
   databaseURL: 'https://essensplaner-family-default-rtdb.europe-west1.firebasedatabase.app',
   projectId: 'essensplaner-family'
