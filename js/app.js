@@ -266,9 +266,79 @@
   const canShop = () => { if (!Fam.active() || Fam.can('shop')) return true; toast('Als ' + Fam.roleLabel(Fam.role()) + ' kannst du die gemeinsame Liste nur ansehen.', 3500); return false; };
   function writeChecked(id, on) { if (!canShop()) return false; if (Fam.active()) { Fam.setChecked(st.weekStart, id, on); touch(); } else { const m = S.get('checked:' + st.weekStart, {}); if (on) m[id] = true; else delete m[id]; save('checked:' + st.weekStart, m); } return true; }
   function writeExtras(list) { if (!canShop()) return false; if (Fam.active()) { Fam.setExtras(st.weekStart, list); touch(); } else save('extras:' + st.weekStart, list); return true; }
+
+  // ───────────── Einkaufsliste ohne Gericht: Katalog ─────────────
+  // Katalogartikel werden als normale „Eigene Artikel“ gespeichert (Name „2× Eier (10 Stk.)“), damit sie ohne Regeländerung
+  // auch in der gemeinsamen Familienliste funktionieren. Menge = Zahl vor dem „×“.
+  const catBase = i => i.n + ' (' + E.fmtAmount(i.pack, i.u, true) + ')';
+  const catSplit = name => { const m = /^(\d+)× (.*)$/.exec(name); return m ? { q: +m[1], base: m[2] } : { q: 1, base: name }; };
+  const amtSplit = name => { const m = /^(\d+(?:,\d+)?) (g|ml|Stk) (.+)$/.exec(name); return m ? { a: parseFloat(m[1].replace(',', '.')), u: m[2], n: m[3] } : null; };
+  const amtName = (a, u, n) => String(Math.round(a * 100) / 100).replace('.', ',') + ' ' + u + ' ' + n;
+  const catName = (base, q) => (q > 1 ? q + '× ' : '') + base;
+  function catItems(c) {
+    const order = E.CATS.slice(); const all = Object.values(c.ing);
+    all.forEach(i => { if (!order.includes(i.cat)) order.push(i.cat); });
+    return all.sort((a, b) => order.indexOf(a.cat) - order.indexOf(b.cat) || a.n.localeCompare(b.n, 'de'));
+  }
+  function extrasCard(c, ex) {
+    const byBase = {}; catItems(c).forEach(i => { byBase[catBase(i)] = i; });
+    let est = 0, n = 0; const byName = {}; catItems(c).forEach(i => { byName[i.n] = i; });
+    ex.forEach(e => { if (e.done) return; const am = amtSplit(e.name), k = catSplit(e.name), i = byBase[k.base]; if (am && byName[am.n] && byName[am.n].u === am.u) { const ii = byName[am.n]; est += Math.ceil(am.a / ii.pack - 1e-9) * E.priceOf(c, ii.id); n++; } else if (i) { est += k.q * E.priceOf(c, i.id); n++; } });
+    return `<section class="card cat"><h3>Eigene Artikel${est ? `<span>${money(est)}</span>` : ''}</h3>
+      <div class="row-actions no-print"><button class="btn primary" data-act="cat-open">📖 Aus Katalog auswählen</button>${ex.some(e => !e.done) ? '<button class="btn" data-act="x-carry">Offene in nächste Woche verschieben</button>' : ''}</div>
+      ${ex.map((e, i) => `<label class="item${e.done ? ' done' : ''}"><input type="checkbox" data-act="xcheck" data-i="${i}" ${e.done ? 'checked' : ''}><span class="box"></span>
+      <span class="item-t"><b>${esc(e.name)}</b></span><button class="icon-btn no-print" data-act="xdel" data-i="${i}" aria-label="Entfernen">${ICO.close}</button></label>`).join('')}
+      <form class="addrow no-print" data-form="xadd"><input name="n" placeholder="Weiteren Artikel hinzufügen …" autocomplete="off" required><button class="btn small primary" type="submit">Hinzufügen</button></form>
+      ${est ? '<p class="muted small">Die Summe oben gilt für Katalogartikel (Richtpreise, angefangene Packungen zählen voll) und ist nicht im Wochenbudget enthalten.</p>' : ''}</section>`;
+  }
+  function catalogSheet() {
+    if (!canShop()) return;
+    const c = ctx(), items = catItems(c), ui = { q: '', cat: '', amt: '' };
+    const cats = [...new Set(items.map(i => i.cat))];
+    const el = openSheet(`<h2 class="sheet-title">Katalog</h2><p class="muted small">Tippe auf „+“, um einen Artikel auf die Einkaufsliste zu setzen – ganz ohne Gericht. Preise sind Richtwerte (${esc(settings().market)}).</p>
+      <input type="search" id="catQ" placeholder="Artikel suchen …" autocomplete="off" class="catq">
+      <div class="chips" id="catChips"></div><div id="catList"></div>`, 'tall');
+    const qtyOf = i => { const b = catBase(i); const x = extras().find(e => catSplit(e.name).base === b); return x ? catSplit(x.name).q : 0; };
+    const draw = () => {
+      const q = ui.q.trim().toLowerCase();
+      el.querySelector('#catChips').innerHTML = `<button class="chip${!ui.cat ? ' on' : ''}" data-catcat="">Alle</button>` + cats.map(k => `<button class="chip${ui.cat === k ? ' on' : ''}" data-catcat="${esc(k)}">${esc(k)}</button>`).join('');
+      const vis = items.filter(i => (!ui.cat || i.cat === ui.cat) && (!q || i.n.toLowerCase().includes(q)));
+      let html = '', last = '';
+      vis.forEach(i => {
+        if (i.cat !== last) { html += `<h3 class="cat-h">${esc(i.cat)}</h3>`; last = i.cat; }
+        const n = qtyOf(i);
+        html += `<div class="alt"><span class="alt-b"><b>${esc(i.n)}</b><small>${E.fmtAmount(i.pack, i.u, true)} · ca. ${money(E.priceOf(c, i.id))}</small></span>` +
+          (n ? `<button class="icon-btn" data-catdec="${esc(i.id)}" aria-label="weniger">−</button><b>${n}</b>` : '') +
+          `<button class="icon-btn" data-catadd="${esc(i.id)}" aria-label="${esc(i.n)} hinzufügen">+</button>` +
+          `<button class="icon-btn" data-catamt="${esc(i.id)}" aria-label="Eigene Menge für ${esc(i.n)}" title="Eigene Menge">⚖</button></div>` +
+          (ui.amt === i.id ? `<form class="addrow" data-catform="${esc(i.id)}"><input name="a" type="number" inputmode="decimal" min="1" step="any" placeholder="Menge" required autofocus><span class="muted">${esc(i.u)}</span><button class="btn small primary" type="submit">Hinzufügen</button></form>` : '');
+      });
+      el.querySelector('#catList').innerHTML = html || '<p class="muted pad">Nichts gefunden. Eigene Artikel kannst du in der Liste per Texteingabe hinzufügen.</p>';
+    };
+    const change = (id, d) => {
+      const i = c.ing[id]; if (!i) return; const b = catBase(i), x = extras().map(e => Object.assign({}, e));
+      const k = x.findIndex(e => catSplit(e.name).base === b);
+      if (k < 0) { if (d > 0) x.push({ name: catName(b, 1), done: false }); }
+      else { const q = catSplit(x[k].name).q + d; if (q < 1) x.splice(k, 1); else x[k] = { name: catName(b, q), done: false }; }
+      if (writeExtras(x)) { render(); draw(); }
+    };
+    el.addEventListener('click', ev => {
+      const t = ev.target.closest('[data-catadd],[data-catdec],[data-catcat],[data-catamt]'); if (!t) return;
+      if (t.dataset.catamt) { ui.amt = ui.amt === t.dataset.catamt ? '' : t.dataset.catamt; draw(); const inp = el.querySelector('[data-catform] input'); if (inp) inp.focus(); } else if (t.dataset.catadd) change(t.dataset.catadd, 1); else if (t.dataset.catdec) change(t.dataset.catdec, -1); else { ui.cat = t.dataset.catcat; draw(); }
+    });
+    el.addEventListener('submit', ev => {
+      const f = ev.target.closest('[data-catform]'); if (!f) return; ev.preventDefault(); ev.stopPropagation();
+      const i = c.ing[f.dataset.catform], a = parseFloat(String(f.elements.a.value).replace(',', '.')); if (!i || !(a > 0)) return;
+      const x = extras().map(e => Object.assign({}, e)), k = x.findIndex(e => { const m = amtSplit(e.name); return m && m.n === i.n && m.u === i.u; });
+      if (k >= 0) x[k] = { name: amtName(amtSplit(x[k].name).a + a, i.u, i.n), done: false }; else x.push({ name: amtName(a, i.u, i.n), done: false });
+      ui.amt = ''; if (writeExtras(x)) { render(); draw(); toast(amtName(a, i.u, i.n) + ' hinzugefügt', 1800); }
+    });
+    el.querySelector('#catQ').addEventListener('input', ev => { ui.q = ev.target.value; draw(); });
+    draw();
+  }
   function viewShop(c) {
     const p = plan();
-    if (!p) return weekNav() + emptyPlan();
+    if (!p) return weekNav() + `<section class="card note"><b>Einkaufsliste ohne Gericht</b><p class="small">Für diese Woche gibt es noch keinen Plan. Du kannst trotzdem eine Liste anlegen: Artikel aus dem Katalog auswählen oder selbst eintippen. Oder erstelle zuerst einen Wochenplan.</p><button class="btn big-btn" data-act="generate">Wochenplan erstellen</button></section>` + extrasCard(c, extras());
     const sum = E.summary(c, p), L = sum.list, chk = checked(), ex = extras();
     const total = L.visible.length + ex.length, done = L.visible.filter(i => chk[i.id]).length + ex.filter(e => e.done).length;
     let html = weekNav() + `<section class="card summary-card"><div class="budget-row"><div><div class="muted">Gesamtkosten (geschätzt)</div><div class="big">${money(L.total)}</div></div>
@@ -286,9 +356,7 @@
         <small>${i.packs}× ${E.fmtAmount(i.pack, i.unit, true)} · benötigt ${E.fmtAmount(i.need, i.unit, i.whole)}${i.stockUsed ? ' (Vorrat berücksichtigt)' : ''}</small></span>
         <span class="price">${i.unknownPrice ? '–' : money(i.cost)}<small>${i.unknownPrice ? 'Preis fehlt' : money(i.price) + '/Pck.'}</small></span></label>`).join('')}</section>`;
     }
-    html += `<section class="card cat"><h3>Eigene Artikel</h3>${ex.map((e, i) => `<label class="item${e.done ? ' done' : ''}"><input type="checkbox" data-act="xcheck" data-i="${i}" ${e.done ? 'checked' : ''}><span class="box"></span>
-      <span class="item-t"><b>${esc(e.name)}</b></span><button class="icon-btn no-print" data-act="xdel" data-i="${i}" aria-label="Entfernen">${ICO.close}</button></label>`).join('')}
-      <form class="addrow no-print" data-form="xadd"><input name="n" placeholder="Weiteren Artikel hinzufügen …" autocomplete="off" required><button class="btn small primary" type="submit">Hinzufügen</button></form></section>`;
+    html += extrasCard(c, ex);
     const hid = L.items.filter(i => i.packs === 0 && !i.pantry);
     if (hid.length) html += `<p class="muted small">Aus dem Vorrat gedeckt: ${hid.map(i => esc(i.name)).join(', ')}.</p>`;
     html += `<p class="muted small">Vorhandene Grundzutaten (Öl, Gewürze, Mehl, Zucker, Brühe) sind nicht enthalten. Unter „Mehr“ kannst du weitere Vorräte eintragen und Preise anpassen.</p>`;
@@ -573,6 +641,14 @@
       case 'csv': { const c = ctx(); download(`einkaufsliste-${st.weekStart}.csv`, 'text/csv;charset=utf-8', E.listToCSV(c, E.planList(c, plan()))); break; }
       case 'reset-checks': if (!canShop()) break; Object.keys(checked()).forEach(k => writeChecked(k, false)); writeExtras(extras().map(e => Object.assign({}, e, { done: false }))); render(); break;
       case 'xdel': { const x = extras().slice(); x.splice(+t.dataset.i, 1); writeExtras(x); render(); break; }
+      case 'cat-open': catalogSheet(); break;
+      case 'x-carry': {
+        if (!canShop()) break; const cur = extras().map(e => Object.assign({}, e)), open = cur.filter(e => !e.done); if (!open.length) break;
+        const nx = E.addWeeks(st.weekStart, 1), has = Fam.active() ? Fam.extras(nx) : S.get('extras:' + nx, []);
+        const merged = has.map(e => ({ name: e.name, done: !!e.done })); open.forEach(e => { if (!merged.some(m => m.name === e.name)) merged.push({ name: e.name, done: false }); });
+        if (Fam.active()) Fam.setExtras(nx, merged); else S.set('extras:' + nx, merged);
+        writeExtras(cur.filter(e => e.done)); touch(); toast(open.length + ' Artikel in die nächste Woche verschoben'); render(); break;
+      }
       case 'prices': pricesSheet(); break;
       case 'stock': stockSheet(); break;
       case 'history': historySheet(); break;
